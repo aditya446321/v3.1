@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Video Selling v3.1
 
 Production-oriented Node.js + PostgreSQL storefront with a server-generated dynamic UPI QR and authenticated admin panel.
@@ -25,4 +26,6 @@ Original price ₹2,000 and sale price ₹499 automatically display `75% OFF`.
 
 ## Deployment
 Use any Node.js host that supports environment variables and a persistent web process (for example Render) and a managed PostgreSQL database (for example Supabase). Set the same environment variables in the host dashboard.
+=======
+>>>>>>> f807b6f270cb0bc1e3d4ff4d90401d9b02333fd7
 "# v3.1" 
