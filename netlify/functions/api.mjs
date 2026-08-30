@@ -3,7 +3,6 @@ import crypto from 'node:crypto';
 import QRCode from 'qrcode';
 
 const store = getStore('video-selling');
-const sessions = new Map();
 
 const seed = () => ({
   storeName: 'Video Selling',
@@ -18,8 +17,7 @@ const seed = () => ({
     ['VIP Elite',349,449,'BEST VALUE'],['VVIP Access',399,499,'VVIP'],['VVIP Black',449,599,'BLACK'],['Ultra Elite',499,699,'ULTRA']
   ].map((x,i)=>({id:`p${i+1}`,name:x[0],price:x[1],original_price:x[2],badge:x[3],description:'Digital access.',features:['Instant access','24×7 support'],active:true,sort_order:i+1})),
   groups: [], offers: [], orders: [], faqs: [],
-  policies: {terms:'',refund:'',privacy:'',digitalGoods:''},
-  adminPin: process.env.ADMIN_PIN || '1234'
+  policies: {terms:'',refund:'',privacy:'',digitalGoods:''}
 });
 
 async function read() {
@@ -30,9 +28,26 @@ async function read() {
   return initial;
 }
 async function write(data) { await store.setJSON('store.json', data); }
-function tokenFrom(event) { return (event.headers?.authorization || event.headers?.Authorization || '').replace(/^Bearer\s+/i,''); }
-function authorized(event) { const token = tokenFrom(event); return !!token && sessions.has(token); }
-function json(statusCode, body) { return { statusCode, headers: {'content-type':'application/json; charset=utf-8','cache-control':'no-store'}, body: JSON.stringify(body) }; }
+
+function adminSecret() {
+  return String(process.env.ADMIN_PIN || '1234');
+}
+function makeToken() {
+  const exp = Date.now() + 24 * 60 * 60 * 1000;
+  const payload = `${exp}`;
+  const sig = crypto.createHmac('sha256', adminSecret()).update(payload).digest('hex');
+  return `${payload}.${sig}`;
+}
+function authorized(event) {
+  const token = (event.headers?.authorization || event.headers?.Authorization || '').replace(/^Bearer\s+/i,'');
+  const [exp, sig] = token.split('.');
+  if (!exp || !sig || Number(exp) < Date.now()) return false;
+  const expected = crypto.createHmac('sha256', adminSecret()).update(exp).digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+}
+function json(statusCode, body) {
+  return { statusCode, headers: {'content-type':'application/json; charset=utf-8','cache-control':'no-store'}, body: JSON.stringify(body) };
+}
 function body(event) { try { return event.body ? JSON.parse(event.body) : {}; } catch { return {}; } }
 
 export default async (event) => {
@@ -43,12 +58,12 @@ export default async (event) => {
     if (path === '/health' && method === 'GET') return json(200,{ok:true,mode:'netlify-blobs'});
 
     if (path === '/admin/login' && method === 'POST') {
-      const b=body(event), s=await read();
-      if (String(b.pin||'') !== String(s.adminPin || process.env.ADMIN_PIN || '1234')) return json(401,{error:'Incorrect PIN'});
-      const token=crypto.randomBytes(24).toString('hex'); sessions.set(token,Date.now()+86400000);
-      return json(200,{token});
+      const b = body(event);
+      const pin = String(b.pin || '');
+      if (!/^\d{4}$/.test(pin) || pin !== adminSecret()) return json(401,{error:'Incorrect PIN'});
+      return json(200,{token:makeToken()});
     }
-    if (path === '/admin/logout' && method === 'POST') { sessions.delete(tokenFrom(event)); return json(200,{ok:true}); }
+    if (path === '/admin/logout' && method === 'POST') return json(200,{ok:true});
     if (path === '/admin/session' && method === 'GET') return authorized(event)?json(200,{ok:true}):json(401,{error:'Unauthorized'});
 
     if (path === '/store' && method === 'GET') return json(200,await read());
@@ -59,7 +74,6 @@ export default async (event) => {
       const current=await read(), b=body(event), next={...current,...b};
       for (const k of ['packages','groups','offers','orders','faqs']) if (!Array.isArray(b[k])) next[k]=current[k];
       next.policies=b.policies || current.policies;
-      next.adminPin=current.adminPin || process.env.ADMIN_PIN || '1234';
       await write(next); return json(200,next);
     }
 
